@@ -1,5 +1,5 @@
-# HP OEM Driver Installer Bootstrapper (Windows 11)
-# Downloads config.json from your GitHub repo, then downloads and launches HP's official tool.
+# HP Driver Installer (Windows 11) - HPIA-based
+# Goal: download/install recommended HP drivers/BIOS/software using HP Image Assistant (HPIA)
 
 $RepoRawBase = "https://raw.githubusercontent.com/hamdanafross/hp-driver-installer/main"
 
@@ -42,7 +42,6 @@ function Download-File($url, $outFile) {
     Invoke-WebRequest -Uri $url -OutFile $outFile
 }
 
-# --- Start ---
 Require-Admin
 
 $info = Get-SystemInfo
@@ -56,68 +55,70 @@ Write-Host ""
 $manu = $info.Manufacturer.ToLower()
 if (-not ($manu -match "hp" -or $manu -match "hewlett")) {
     Write-Host "This script is HP-only. Your manufacturer is: $($info.Manufacturer)"
-    if (Ask-YesNo "Open HP drivers website anyway?") {
-        Start-Process "https://support.hp.com/drivers"
-    }
+    if (Ask-YesNo "Open HP drivers website anyway?") { Start-Process "https://support.hp.com/drivers" }
     exit 1
 }
 
 # Fetch config.json from GitHub
-$downloadDir = Join-Path $env:TEMP "hp-oem-driver-installer"
-New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+$workDir = Join-Path $env:TEMP "hp-driver-installer"
+New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
 $configUrl  = "$RepoRawBase/config.json"
-$configPath = Join-Path $downloadDir "config.json"
-
-try {
-    Download-File -url $configUrl -outFile $configPath
-} catch {
-    Write-Host "Failed to download config.json from: $configUrl"
-    Write-Host "Check that your repo is public and the URL is correct."
-    Write-Host $_
-    exit 1
-}
+$configPath = Join-Path $workDir "config.json"
+Download-File -url $configUrl -outFile $configPath
 
 $config = Get-Content $configPath -Raw | ConvertFrom-Json
-$url = $config.hpSupportAssistant.downloadUrl
 
-if ([string]::IsNullOrWhiteSpace($url) -or $url -like "*PASTE_OFFICIAL_HP_URL_HERE*") {
-    Write-Host "config.json has no HP downloadUrl set."
-    Write-Host "Fix:"
-    Write-Host "1) Open https://support.hp.com/"
-    Write-Host "2) Find the official HP Support Assistant download link"
-    Write-Host "3) Paste it into config.json and commit to GitHub"
-    if (Ask-YesNo "Open HP Support page now?") {
-        Start-Process "https://support.hp.com/"
-    }
+if (-not $config.hpImageAssistant -or [string]::IsNullOrWhiteSpace($config.hpImageAssistant.downloadPageUrl)) {
+    Write-Host "config.json is missing hpImageAssistant.downloadPageUrl"
     exit 1
 }
 
-Write-Host "Tool to install: $($config.hpSupportAssistant.name)"
+$hpiaPage = $config.hpImageAssistant.downloadPageUrl
+$hpiaExe  = "C:\SWSetup\HP_Image_Assistant\HPImageAssistant.exe"
+
+Write-Host "HPIA expected path (after extraction):"
+Write-Host "  $hpiaExe"
 Write-Host ""
 
-if (-not (Ask-YesNo "Download and run the official installer now?")) {
-    Write-Host "Cancelled."
+if (-not (Test-Path $hpiaExe)) {
+    Write-Host "HPIA is not installed/extracted yet."
+    Write-Host "Opening the official HPIA download page now:"
+    Write-Host "  $hpiaPage"
+    Start-Process $hpiaPage
+
+    Write-Host ""
+    Write-Host "Please:"
+    Write-Host "1) Download the HPIA SoftPaq EXE from that page"
+    Write-Host "2) Run it (it extracts to C:\SWSetup by default)"
+    Write-Host "3) Re-run this script"
     exit 0
 }
 
-$installerPath = Join-Path $downloadDir "HP_Support_Assistant_Installer.exe"
+# Run analysis first and generate a report
+$reportDir   = Join-Path $workDir "reports"
+$softpaqDir  = Join-Path $workDir "softpaqs"
+New-Item -ItemType Directory -Force -Path $reportDir  | Out-Null
+New-Item -ItemType Directory -Force -Path $softpaqDir | Out-Null
 
-try {
-    Download-File -url $url -outFile $installerPath
-} catch {
-    Write-Host "Failed to download installer from: $url"
-    Write-Host $_
-    exit 1
+Write-Host "Running HPIA analysis (silent)..."
+Start-Process -FilePath $hpiaExe -ArgumentList "/Operation:Analyze /Action:List /Silent /ReportFolder:$reportDir /SoftpaqDownloadFolder:$softpaqDir" -Wait
+
+Write-Host ""
+Write-Host "A recommendations report should now exist under:"
+Write-Host "  $reportDir"
+Write-Host ""
+
+if (-not (Ask-YesNo "Download + install recommended updates now?")) {
+    Write-Host "Stopping after analysis. You can review the report folder."
+    exit 0
 }
 
-Write-Host "Launching installer..."
-Start-Process -FilePath $installerPath -Wait
+Write-Host "Installing recommended updates (silent). This can take a while..."
+# Note: HPIA supports /Operation:Analyze with /Action:Install to download/extract/install. Only auto-installable SoftPaqs install silently.
+Start-Process -FilePath $hpiaExe -ArgumentList "/Operation:Analyze /Action:Install /Silent /ReportFolder:$reportDir /SoftpaqDownloadFolder:$softpaqDir" -Wait
 
 Write-Host ""
-Write-Host "Next steps:"
-Write-Host "1) Open HP Support Assistant"
-Write-Host "2) Go to Updates / Drivers"
-Write-Host "3) Install recommended updates"
-Write-Host ""
-Write-Host "Done."
+Write-Host "Done. Check reports here:"
+Write-Host "  $reportDir"
+Write-Host "You might need to reboot if BIOS/firmware was updated."
