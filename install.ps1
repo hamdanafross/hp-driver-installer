@@ -1,5 +1,5 @@
 # HP Driver Installer (Windows 11) - HPIA-based
-# Goal: download/install recommended HP drivers/BIOS/software using HP Image Assistant (HPIA)
+# Uses HP Image Assistant to download/install recommended drivers for the current HP model.
 
 $RepoRawBase = "https://raw.githubusercontent.com/hamdanafross/hp-driver-installer/main"
 
@@ -59,66 +59,68 @@ if (-not ($manu -match "hp" -or $manu -match "hewlett")) {
     exit 1
 }
 
-# Fetch config.json from GitHub
+# Work dir
 $workDir = Join-Path $env:TEMP "hp-driver-installer"
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 
+# Fetch config.json from GitHub
 $configUrl  = "$RepoRawBase/config.json"
 $configPath = Join-Path $workDir "config.json"
 Download-File -url $configUrl -outFile $configPath
-
 $config = Get-Content $configPath -Raw | ConvertFrom-Json
 
 if (-not $config.hpImageAssistant -or [string]::IsNullOrWhiteSpace($config.hpImageAssistant.downloadPageUrl)) {
     Write-Host "config.json is missing hpImageAssistant.downloadPageUrl"
+    Write-Host "Fix config.json and try again."
     exit 1
 }
 
 $hpiaPage = $config.hpImageAssistant.downloadPageUrl
-$hpiaExe  = "C:\SWSetup\HP_Image_Assistant\HPImageAssistant.exe"
 
-Write-Host "HPIA expected path (after extraction):"
+# Where HPIA usually ends up after you run the SoftPaq extractor
+$hpiaExe = "C:\SWSetup\HP_Image_Assistant\HPImageAssistant.exe"
+
+Write-Host "Using tool: $($config.hpImageAssistant.name)"
+Write-Host "Expected path:"
 Write-Host "  $hpiaExe"
 Write-Host ""
 
 if (-not (Test-Path $hpiaExe)) {
-    Write-Host "HPIA is not installed/extracted yet."
-    Write-Host "Opening the official HPIA download page now:"
+    Write-Host "HPIA not found yet."
+    Write-Host "Opening official HPIA download page:"
     Write-Host "  $hpiaPage"
     Start-Process $hpiaPage
 
     Write-Host ""
     Write-Host "Please:"
-    Write-Host "1) Download the HPIA SoftPaq EXE from that page"
-    Write-Host "2) Run it (it extracts to C:\SWSetup by default)"
+    Write-Host "1) Download the HPIA SoftPaq from that page"
+    Write-Host "2) Run it to extract (default is under C:\SWSetup\HP_Image_Assistant)"
     Write-Host "3) Re-run this script"
     exit 0
 }
 
-# Run analysis first and generate a report
-$reportDir   = Join-Path $workDir "reports"
-$softpaqDir  = Join-Path $workDir "softpaqs"
+$reportDir  = Join-Path $workDir "reports"
+$softpaqDir = Join-Path $workDir "softpaqs"
 New-Item -ItemType Directory -Force -Path $reportDir  | Out-Null
 New-Item -ItemType Directory -Force -Path $softpaqDir | Out-Null
 
-Write-Host "Running HPIA analysis (silent)..."
+Write-Host "Analyzing system and listing recommendations..."
 Start-Process -FilePath $hpiaExe -ArgumentList "/Operation:Analyze /Action:List /Silent /ReportFolder:$reportDir /SoftpaqDownloadFolder:$softpaqDir" -Wait
 
 Write-Host ""
-Write-Host "A recommendations report should now exist under:"
+Write-Host "Report folder:"
 Write-Host "  $reportDir"
 Write-Host ""
 
 if (-not (Ask-YesNo "Download + install recommended updates now?")) {
-    Write-Host "Stopping after analysis. You can review the report folder."
+    Write-Host "Stopping after analysis."
     exit 0
 }
 
-Write-Host "Installing recommended updates (silent). This can take a while..."
-# Note: HPIA supports /Operation:Analyze with /Action:Install to download/extract/install. Only auto-installable SoftPaqs install silently.
+Write-Host "Installing recommended updates..."
 Start-Process -FilePath $hpiaExe -ArgumentList "/Operation:Analyze /Action:Install /Silent /ReportFolder:$reportDir /SoftpaqDownloadFolder:$softpaqDir" -Wait
 
 Write-Host ""
-Write-Host "Done. Check reports here:"
+Write-Host "Done. You may need to reboot."
+Write-Host "Reports:"
 Write-Host "  $reportDir"
-Write-Host "You might need to reboot if BIOS/firmware was updated."
