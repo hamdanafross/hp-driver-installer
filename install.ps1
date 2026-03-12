@@ -1,5 +1,7 @@
 # HP OEM Driver Installer Bootstrapper (Windows 11)
-# Hosted on GitHub. Downloads official HP tool and runs it.
+# Downloads config.json from your GitHub repo, then downloads and launches HP's official tool.
+
+$RepoRawBase = "https://raw.githubusercontent.com/hamdanafross/hp-driver-installer/main"
 
 function Require-Admin {
     $isAdmin = ([Security.Principal.WindowsPrincipal] `
@@ -8,7 +10,7 @@ function Require-Admin {
 
     if (-not $isAdmin) {
         Write-Host "Need Administrator privileges. Re-launching elevated..."
-        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$($MyInvocation.MyCommand.Definition)`"" -Verb RunAs
         exit
     }
 }
@@ -60,11 +62,19 @@ if (-not ($manu -match "hp" -or $manu -match "hewlett")) {
     exit 1
 }
 
-# Config is expected to be next to this script (downloaded together or fetched by your bootstrap command)
-$configPath = Join-Path $PSScriptRoot "config.json"
-if (-not (Test-Path $configPath)) {
-    Write-Host "Missing config.json next to install.ps1."
-    Write-Host "Fix: ensure config.json exists in the same GitHub repo and is downloaded."
+# Fetch config.json from GitHub
+$downloadDir = Join-Path $env:TEMP "hp-oem-driver-installer"
+New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+
+$configUrl  = "$RepoRawBase/config.json"
+$configPath = Join-Path $downloadDir "config.json"
+
+try {
+    Download-File -url $configUrl -outFile $configPath
+} catch {
+    Write-Host "Failed to download config.json from: $configUrl"
+    Write-Host "Check that your repo is public and the URL is correct."
+    Write-Host $_
     exit 1
 }
 
@@ -73,7 +83,8 @@ $url = $config.hpSupportAssistant.downloadUrl
 
 if ([string]::IsNullOrWhiteSpace($url) -or $url -like "*PASTE_OFFICIAL_HP_URL_HERE*") {
     Write-Host "config.json has no HP downloadUrl set."
-    Write-Host "1) Open: https://support.hp.com/"
+    Write-Host "Fix:"
+    Write-Host "1) Open https://support.hp.com/"
     Write-Host "2) Find the official HP Support Assistant download link"
     Write-Host "3) Paste it into config.json and commit to GitHub"
     if (Ask-YesNo "Open HP Support page now?") {
@@ -90,11 +101,15 @@ if (-not (Ask-YesNo "Download and run the official installer now?")) {
     exit 0
 }
 
-$downloadDir = Join-Path $env:TEMP "hp-oem-driver-installer"
-New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
-
 $installerPath = Join-Path $downloadDir "HP_Support_Assistant_Installer.exe"
-Download-File -url $url -outFile $installerPath
+
+try {
+    Download-File -url $url -outFile $installerPath
+} catch {
+    Write-Host "Failed to download installer from: $url"
+    Write-Host $_
+    exit 1
+}
 
 Write-Host "Launching installer..."
 Start-Process -FilePath $installerPath -Wait
@@ -102,7 +117,7 @@ Start-Process -FilePath $installerPath -Wait
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "1) Open HP Support Assistant"
-Write-Host "2) Go to Updates / Drivers (wording may vary)"
+Write-Host "2) Go to Updates / Drivers"
 Write-Host "3) Install recommended updates"
 Write-Host ""
 Write-Host "Done."
