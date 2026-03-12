@@ -1,6 +1,6 @@
 {
-  "hpSupportAssistant": {
-    "name": "HP Support Assistant",
-    "downloadUrl": "https://ftp.hp.com/pub/softpaq/sp171501-172000/sp171501.exe"
+  "hpImageAssistant": {
+    "name": "HP Image Assistant (HPIA)",
+    "downloadPageUrl": "https://ftp.ext.hp.com/pub/caps-softpaq/cmit/HPIA.html"
   }
 }
